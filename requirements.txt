@@ -1,5 +1,5 @@
-streamlit
-audiorecorder
+streamlit==1.36.0
+streamlit-audio-recorder
 speechbrain
 torch
 scikit-learn
