@@ -1,97 +1,122 @@
-import os
-# Ensure ffmpeg is available for pydub / audio decoding
-os.system("apt-get update -y && apt-get install -y ffmpeg")
-
+import os, json, io
+import numpy as np
 import streamlit as st
 from audiorecorder import audiorecorder
 from resemblyzer import VoiceEncoder, preprocess_wav
 from scipy.spatial.distance import cosine
-import numpy as np
-import io
-import soundfile as sf
 from gtts import gTTS
+import soundfile as sf
+from pathlib import Path
 
-# ───────────────────────────────────────────────
-# STREAMLIT SETUP
-st.set_page_config(page_title="Voice Biometric Assistant", page_icon="🎙️", layout="wide")
+# ───────────────────────────────
+# INITIAL SETUP
+st.set_page_config(page_title="Voice Access Portal", page_icon="🎙️", layout="wide")
 
-st.sidebar.title("🎧 Voice Biometric Assistant")
-st.sidebar.write("""
-### About this App
-- 🎙️ Record your voice in real time  
-- 🧠 Identify who you are  
-- 💬 Get a text + audio response
-""")
+# ensure ffmpeg
+os.system("apt-get update -y && apt-get install -y ffmpeg")
+
+# directories
+Path("data/voices").mkdir(parents=True, exist_ok=True)
+DB_PATH = Path("data/embeddings.json")
+
+if DB_PATH.exists():
+    with open(DB_PATH, "r") as f:
+        registered_speakers = json.load(f)
+else:
+    registered_speakers = {}
 
 encoder = VoiceEncoder()
-registered_speakers = {}
 
-# ───────────────────────────────────────────────
-# SECTION: Speaker Registration
-st.header("🔐 Register Speaker")
-st.write("Press **Start Recording**, say a few words (5–10 seconds), then **Stop Recording** and enter your name to register.")
+# ───────────────────────────────
+# SIDEBAR
+st.sidebar.markdown("""
+# 🏢 Voice Access Portal
+> Secure, AI-driven authentication by voice
+""")
+choice = st.sidebar.radio("Navigate", ["🔐 Register Speaker", "🎤 Verify Speaker"])
+st.sidebar.info("Ensure clear microphone audio for best results.")
 
-reg_audio = audiorecorder("🎙️ Start Recording", "⏹️ Stop Recording", key="reg")
+# utility to save embeddings
+def save_db():
+    with open(DB_PATH, "w") as f:
+        json.dump(registered_speakers, f)
 
-if len(reg_audio) > 0:
-    st.audio(reg_audio.export().read(), format="audio/wav")
+# ───────────────────────────────
+# 1️⃣ REGISTER SPEAKER
+if choice == "🔐 Register Speaker":
+    st.title("🔐 Register a New Speaker")
+    st.write("Record your voice (5–10 seconds) and enter your name.")
 
-    name = st.text_input("Enter your name:", key="name")
-    if st.button("Register Voice"):
-        # Convert pydub AudioSegment to NumPy wav
+    reg_audio = audiorecorder("🎙️ Start Recording", "⏹️ Stop Recording", key="reg")
+
+    if len(reg_audio) > 0:
+        st.audio(reg_audio.export().read(), format="audio/wav")
+
+        name = st.text_input("Enter your name:")
+        if st.button("Register Voice"):
+            wav_bytes = io.BytesIO()
+            reg_audio.export(wav_bytes, format="wav")
+            wav_bytes.seek(0)
+            wav_data, sr = sf.read(wav_bytes)
+            wav = preprocess_wav(wav_data)
+            embedding = encoder.embed_utterance(wav)
+
+            registered_speakers[name] = embedding.tolist()
+            save_db()
+
+            # save voice file
+            with open(f"data/voices/{name}.wav", "wb") as f:
+                f.write(wav_bytes.getbuffer())
+
+            st.success(f"✅ Speaker '{name}' registered successfully!")
+            st.balloons()
+
+# ───────────────────────────────
+# 2️⃣ VERIFY SPEAKER
+elif choice == "🎤 Verify Speaker":
+    st.title("🎤 Verify Speaker")
+    st.write("Record your voice for verification.")
+
+    test_audio = audiorecorder("🎙️ Start Recording", "⏹️ Stop Recording", key="test")
+
+    if len(test_audio) > 0:
+        st.audio(test_audio.export().read(), format="audio/wav")
+
         wav_bytes = io.BytesIO()
-        reg_audio.export(wav_bytes, format="wav")
+        test_audio.export(wav_bytes, format="wav")
         wav_bytes.seek(0)
         wav_data, sr = sf.read(wav_bytes)
         wav = preprocess_wav(wav_data)
-        embedding = encoder.embed_utterance(wav)
+        test_embedding = encoder.embed_utterance(wav)
 
-        registered_speakers[name] = embedding
-        st.success(f"✅ Speaker '{name}' registered successfully!")
+        if registered_speakers:
+            similarities = {
+                name: 1 - cosine(test_embedding, np.array(emb))
+                for name, emb in registered_speakers.items()
+            }
 
-# ───────────────────────────────────────────────
-# SECTION: Speaker Verification
-st.header("🎤 Identify Speaker")
-st.write("Now record your voice again — the system will try to recognize you.")
+            identified_name = max(similarities, key=similarities.get)
+            confidence = similarities[identified_name]
 
-test_audio = audiorecorder("🎙️ Start Recording", "⏹️ Stop Recording", key="test")
+            st.markdown(f"### 🔎 Identified as: **{identified_name}** (confidence: {confidence:.2f})")
 
-if len(test_audio) > 0:
-    st.audio(test_audio.export().read(), format="audio/wav")
+            if confidence > 0.75:
+                message = f"✅ Welcome {identified_name}! Access granted."
+                color = "green"
+            else:
+                message = "🚫 Access Denied. Unrecognized voice."
+                color = "red"
 
-    # Convert pydub AudioSegment to NumPy wav
-    wav_bytes = io.BytesIO()
-    test_audio.export(wav_bytes, format="wav")
-    wav_bytes.seek(0)
-    wav_data, sr = sf.read(wav_bytes)
-    wav = preprocess_wav(wav_data)
-    test_embedding = encoder.embed_utterance(wav)
+            st.markdown(f"<h3 style='color:{color}'>{message}</h3>", unsafe_allow_html=True)
 
-    if registered_speakers:
-        similarities = {
-            name: 1 - cosine(test_embedding, emb)
-            for name, emb in registered_speakers.items()
-        }
-        identified_name = max(similarities, key=similarities.get)
-        confidence = similarities[identified_name]
+            # Voice feedback
+            tts = gTTS(message)
+            tts.save("response.mp3")
+            st.audio("response.mp3", format="audio/mp3")
 
-        st.markdown(f"### 🧭 Identified as: **{identified_name}** (confidence: {confidence:.2f})")
-
-        if confidence > 0.7:
-            response_text = f"Hello {identified_name}, welcome back! How can I assist you today?"
+            # Sidebar summary
+            st.sidebar.markdown("### 🧠 Verification Summary")
+            st.sidebar.write(f"**Speaker:** {identified_name}")
+            st.sidebar.write(f"**Confidence:** {confidence:.2f}")
         else:
-            response_text = "Sorry, I couldn’t confidently identify you. Please try again."
-
-        st.write("💬 Response:", response_text)
-
-        # Convert response to speech
-        tts = gTTS(response_text)
-        tts.save("response.mp3")
-        st.audio("response.mp3", format="audio/mp3")
-
-        # Sidebar summary
-        st.sidebar.markdown("### 🔎 Detection Summary")
-        st.sidebar.write(f"**Speaker:** {identified_name}")
-        st.sidebar.write(f"**Confidence:** {confidence:.2f}")
-    else:
-        st.warning("⚠️ No registered speakers found. Please register first.")
+            st.warning("⚠️ No registered speakers found. Please register first.")
