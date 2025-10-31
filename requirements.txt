@@ -10,3 +10,6 @@ torchaudio
 scikit-learn
 plotly
 streamlit-audiorecorder
+pydub
+ffmpeg-python
+soundfile
