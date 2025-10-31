@@ -1,86 +1,82 @@
 import streamlit as st
-import numpy as np
-import json
-from pathlib import Path
+from streamlit_audio_recorder import st_audio_recorder
 from resemblyzer import VoiceEncoder, preprocess_wav
 from scipy.spatial.distance import cosine
-import tempfile
+import numpy as np
+import io
+import soundfile as sf
+from gtts import gTTS
 import os
 
-# Initialize encoder and database
+# ───────────────────────────────────────────────
+# SETUP
+st.set_page_config(page_title="Voice Biometric Assistant", page_icon="🎙️", layout="wide")
+st.sidebar.title("🎧 Voice Biometric Assistant")
+st.sidebar.write("""
+- 🎙️ Record your voice in real time  
+- 🧠 Identify who you are  
+- 💬 Get a text + audio response
+""")
+
 encoder = VoiceEncoder()
-DB_PATH = Path("voice_db.json")
+registered_speakers = {}
 
-if not DB_PATH.exists():
-    with open(DB_PATH, "w") as f:
-        json.dump({}, f)
+# ───────────────────────────────────────────────
+# SECTION: Speaker Registration
+st.header("🔐 Register Speaker")
 
-# App title
-st.title("🎤 Voice Biometrics Demo")
-st.caption("Register your voice and verify identity using speaker embeddings")
+st.write("Press record, say a few words (5–10 seconds), and enter your name to register.")
 
-# Tabs for Register and Verify
-tab1, tab2 = st.tabs(["🧠 Register Voice", "🔍 Verify Speaker"])
+reg_audio = st_audio_recorder(key="reg")
 
-# ----------------------- Registration Tab -----------------------
-with tab1:
-    st.header("🧩 Voice Enrollment")
-    name = st.text_input("Enter speaker name:")
-    uploaded_file = st.file_uploader("Upload a short WAV file (3–10 sec)", type=["wav"], key="register")
-
-    if uploaded_file and name:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(uploaded_file.read())
-            tmp_path = tmp.name
-
-        wav = preprocess_wav(Path(tmp_path))
+if reg_audio:
+    st.audio(reg_audio, format="audio/wav")
+    name = st.text_input("Enter your name:", key="name")
+    if st.button("Register Voice"):
+        wav_data, sr = sf.read(io.BytesIO(reg_audio))
+        wav = preprocess_wav(wav_data)
         embedding = encoder.embed_utterance(wav)
-
-        # Save embedding
-        with open(DB_PATH, "r+") as f:
-            db = json.load(f)
-            db[name] = embedding.tolist()
-            f.seek(0)
-            json.dump(db, f, indent=2)
-
+        registered_speakers[name] = embedding
         st.success(f"✅ Speaker '{name}' registered successfully!")
-        st.audio(uploaded_file, format="audio/wav")
 
-# ----------------------- Verification Tab -----------------------
-with tab2:
-    st.header("🎙️ Speaker Verification")
-    test_file = st.file_uploader("Upload a voice sample for verification", type=["wav"], key="verify")
+# ───────────────────────────────────────────────
+# SECTION: Speaker Verification
+st.header("🎤 Identify Speaker")
 
-    if test_file:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(test_file.read())
-            tmp_path = tmp.name
+st.write("Record your voice again — we'll try to identify who you are.")
 
-        wav_verify = preprocess_wav(Path(tmp_path))
-        embedding_verify = encoder.embed_utterance(wav_verify)
+test_audio = st_audio_recorder(key="test")
 
-        with open(DB_PATH, "r") as f:
-            db = json.load(f)
+if test_audio:
+    st.audio(test_audio, format="audio/wav")
 
-        if not db:
-            st.warning("No registered voices yet. Please register first.")
+    wav_data, sr = sf.read(io.BytesIO(test_audio))
+    wav = preprocess_wav(wav_data)
+    test_embedding = encoder.embed_utterance(wav)
+
+    if registered_speakers:
+        similarities = {name: 1 - cosine(test_embedding, emb)
+                        for name, emb in registered_speakers.items()}
+        identified_name = max(similarities, key=similarities.get)
+        confidence = similarities[identified_name]
+
+        st.markdown(f"### 🧭 Identified as: **{identified_name}** (confidence: {confidence:.2f})")
+
+        if confidence > 0.7:
+            response_text = f"Hello {identified_name}, welcome back! How can I assist you today?"
         else:
-            scores = {}
-            for user, emb_list in db.items():
-                emb = np.array(emb_list)
-                similarity = 1 - cosine(embedding_verify, emb)
-                scores[user] = round(similarity, 3)
+            response_text = "Sorry, I couldn’t confidently identify you. Please try again."
 
-            st.subheader("🔎 Similarity Scores")
-            st.dataframe(
-                {"Speaker": list(scores.keys()), "Similarity": list(scores.values())},
-                use_container_width=True,
-            )
+        st.write("💬 Response:", response_text)
 
-            best_match = max(scores, key=scores.get)
-            if scores[best_match] > 0.80:
-                st.success(f"✅ Verified as {best_match} ({scores[best_match]})")
-            else:
-                st.error("❌ Speaker not recognized.")
+        # Convert response to speech
+        tts = gTTS(response_text)
+        tts.save("response.mp3")
+        st.audio("response.mp3", format="audio/mp3")
 
-            st.audio(test_file, format="audio/wav")
+        # Sidebar summary
+        st.sidebar.markdown("### 🔎 Detection Summary")
+        st.sidebar.write(f"**Speaker:** {identified_name}")
+        st.sidebar.write(f"**Confidence:** {confidence:.2f}")
+    else:
+        st.warning("⚠️ No registered speakers found. Please register first.")
