@@ -41,32 +41,53 @@ def load_models():
 sentiment_analyzer, summarizer = load_models()
 
 # -------------------------------
-# RUN SENTIMENT ANALYSIS
+# SENTIMENT ANALYSIS
 # -------------------------------
-st.subheader("💬 Sentiment Analysis")
+st.markdown("## 💬 Sentiment Insights")
+
 with st.spinner("Analyzing sentiments..."):
     df["Sentiment"] = df["text"].apply(lambda x: sentiment_analyzer(x[:512])[0]["label"])
 
-# Count sentiments
-sentiment_counts = df["Sentiment"].value_counts()
+# Sentiment metrics
+total = len(df)
+positive = (df["Sentiment"] == "POSITIVE").sum()
+negative = (df["Sentiment"] == "NEGATIVE").sum()
+positive_pct = round((positive / total) * 100, 1)
+negative_pct = round((negative / total) * 100, 1)
 
-# Plot chart
-fig, ax = plt.subplots()
-sentiment_counts.plot(kind="bar", color=["green", "red"], ax=ax)
+# Display metrics in columns
+col1, col2, col3 = st.columns(3)
+col1.metric("Total Entries", total)
+col2.metric("Positive Feedback", f"{positive_pct}% 👍", delta=positive)
+col3.metric("Negative Feedback", f"{negative_pct}% 👎", delta=-negative)
+
+# Plot bar chart
+fig, ax = plt.subplots(figsize=(4, 3))
+df["Sentiment"].value_counts().plot(kind="bar", color=["green", "red"], ax=ax)
 ax.set_title("Sentiment Distribution")
 ax.set_ylabel("Count")
 st.pyplot(fig)
 
 # -------------------------------
-# GENERATE SUMMARY
+# SUMMARIZATION
 # -------------------------------
-st.subheader("🧠 AI Summary of All Feedback")
-all_text = " ".join(df["text"].astype(str).tolist())
+st.markdown("## 🧠 Overall Summary")
 
+all_text = " ".join(df["text"].astype(str).tolist())
 with st.spinner("Summarizing insights..."):
     summary = summarizer(all_text[:2000], max_length=120, min_length=40, do_sample=False)[0]["summary_text"]
 
-st.success(summary)
+# Two-column layout for visual balance
+c1, c2 = st.columns([1, 2])
+with c1:
+    st.markdown("### 🪄 Summary")
+    st.success(summary)
+with c2:
+    st.markdown("### 📊 Sentiment Trend")
+    fig2, ax2 = plt.subplots(figsize=(4, 3))
+    df["Sentiment"].value_counts().plot.pie(autopct="%1.1f%%", colors=["lightgreen", "salmon"], ax=ax2)
+    ax2.set_ylabel("")
+    st.pyplot(fig2)
 
 st.markdown("---")
 st.caption("Built with ❤️ using Streamlit + Hugging Face Transformers")
