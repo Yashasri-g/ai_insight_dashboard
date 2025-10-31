@@ -5,6 +5,8 @@ numpy
 scipy
 gTTS
 torch
+wavio
+sounddevice
 pydub
 scikit-learn
 plotly
