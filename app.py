@@ -1,18 +1,23 @@
+import os
+# Ensure ffmpeg is available for pydub / audio decoding
+os.system("apt-get update -y && apt-get install -y ffmpeg")
+
 import streamlit as st
-from audiorecorder import audiorecorder   # ✅ correct import for streamlit-audiorecorder
+from audiorecorder import audiorecorder
 from resemblyzer import VoiceEncoder, preprocess_wav
 from scipy.spatial.distance import cosine
 import numpy as np
 import io
 import soundfile as sf
 from gtts import gTTS
-import os
 
 # ───────────────────────────────────────────────
-# SETUP
+# STREAMLIT SETUP
 st.set_page_config(page_title="Voice Biometric Assistant", page_icon="🎙️", layout="wide")
+
 st.sidebar.title("🎧 Voice Biometric Assistant")
 st.sidebar.write("""
+### About this App
 - 🎙️ Record your voice in real time  
 - 🧠 Identify who you are  
 - 💬 Get a text + audio response
@@ -24,19 +29,19 @@ registered_speakers = {}
 # ───────────────────────────────────────────────
 # SECTION: Speaker Registration
 st.header("🔐 Register Speaker")
+st.write("Press **Start Recording**, say a few words (5–10 seconds), then **Stop Recording** and enter your name to register.")
 
-st.write("Press record, say a few words (5–10 seconds), and enter your name to register.")
-
-# record using the audiorecorder component
 reg_audio = audiorecorder("🎙️ Start Recording", "⏹️ Stop Recording", key="reg")
 
 if len(reg_audio) > 0:
     st.audio(reg_audio.export().read(), format="audio/wav")
-    name = st.text_input("Enter your name:", key="name")
 
+    name = st.text_input("Enter your name:", key="name")
     if st.button("Register Voice"):
-        # convert audio segment to numpy waveform
-        wav_bytes = io.BytesIO(reg_audio.export().read())
+        # Convert pydub AudioSegment to NumPy wav
+        wav_bytes = io.BytesIO()
+        reg_audio.export(wav_bytes, format="wav")
+        wav_bytes.seek(0)
         wav_data, sr = sf.read(wav_bytes)
         wav = preprocess_wav(wav_data)
         embedding = encoder.embed_utterance(wav)
@@ -47,15 +52,17 @@ if len(reg_audio) > 0:
 # ───────────────────────────────────────────────
 # SECTION: Speaker Verification
 st.header("🎤 Identify Speaker")
-
-st.write("Record your voice again — we'll try to identify who you are.")
+st.write("Now record your voice again — the system will try to recognize you.")
 
 test_audio = audiorecorder("🎙️ Start Recording", "⏹️ Stop Recording", key="test")
 
 if len(test_audio) > 0:
     st.audio(test_audio.export().read(), format="audio/wav")
 
-    wav_bytes = io.BytesIO(test_audio.export().read())
+    # Convert pydub AudioSegment to NumPy wav
+    wav_bytes = io.BytesIO()
+    test_audio.export(wav_bytes, format="wav")
+    wav_bytes.seek(0)
     wav_data, sr = sf.read(wav_bytes)
     wav = preprocess_wav(wav_data)
     test_embedding = encoder.embed_utterance(wav)
