@@ -34,8 +34,14 @@ st.dataframe(df.head())
 # -------------------------------
 @st.cache_resource
 def load_models():
-    sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
-    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+    sentiment_analyzer = pipeline(
+        "sentiment-analysis",
+        model="distilbert-base-uncased-finetuned-sst-2-english"
+    )
+    summarizer = pipeline(
+        "summarization",
+        model="facebook/bart-large-cnn"
+    )
     return sentiment_analyzer, summarizer
 
 sentiment_analyzer, summarizer = load_models()
@@ -57,9 +63,9 @@ negative_pct = round((negative / total) * 100, 1)
 
 # Display metrics in columns
 col1, col2, col3 = st.columns(3)
-col1.metric("Total Entries", total)
-col2.metric("Positive Feedback", f"{positive_pct}% 👍", delta=positive)
-col3.metric("Negative Feedback", f"{negative_pct}% 👎", delta=-negative)
+col1.metric("Total Entries", int(total))
+col2.metric("Positive Feedback", f"{positive_pct}% 👍", delta=int(positive))
+col3.metric("Negative Feedback", f"{negative_pct}% 👎", delta=-int(negative))
 
 # Plot bar chart
 fig, ax = plt.subplots(figsize=(4, 3))
@@ -74,18 +80,30 @@ st.pyplot(fig)
 st.markdown("## 🧠 Overall Summary")
 
 all_text = " ".join(df["text"].astype(str).tolist())
-with st.spinner("Summarizing insights..."):
-    summary = summarizer(all_text[:2000], max_length=120, min_length=40, do_sample=False)[0]["summary_text"]
 
-# Two-column layout for visual balance
+with st.spinner("Summarizing insights..."):
+    summary = summarizer(
+        all_text[:2000],
+        max_length=120,
+        min_length=40,
+        do_sample=False
+    )[0]["summary_text"]
+
+# Two-column layout
 c1, c2 = st.columns([1, 2])
+
 with c1:
     st.markdown("### 🪄 Summary")
     st.success(summary)
+
 with c2:
     st.markdown("### 📊 Sentiment Trend")
     fig2, ax2 = plt.subplots(figsize=(4, 3))
-    df["Sentiment"].value_counts().plot.pie(autopct="%1.1f%%", colors=["lightgreen", "salmon"], ax=ax2)
+    df["Sentiment"].value_counts().plot.pie(
+        autopct="%1.1f%%",
+        colors=["lightgreen", "salmon"],
+        ax=ax2
+    )
     ax2.set_ylabel("")
     st.pyplot(fig2)
 
