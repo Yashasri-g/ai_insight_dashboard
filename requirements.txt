@@ -1,8 +1,0 @@
-streamlit==1.36.0
-streamlit-audio-recorder
-speechbrain
-torch
-scikit-learn
-scipy
-gTTS
-numpy
