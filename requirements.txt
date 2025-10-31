@@ -1,12 +1,13 @@
 streamlit==1.36.0
+streamlit-audiorecorder
 resemblyzer==0.1.4
 soundfile
 pydub
+imageio[ffmpeg]
 ffmpeg-python
-gTTS
-numpy
-scipy
 torch
 torchaudio
+numpy
+scipy
 scikit-learn
-streamlit-audiorecorder
+gTTS
