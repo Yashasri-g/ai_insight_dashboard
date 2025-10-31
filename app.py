@@ -1,108 +1,86 @@
-%%writefile app.py
-# --- Voice Biometrics Streamlit App ---
 import streamlit as st
 import numpy as np
-from resemblyzer import VoiceEncoder, preprocess_wav
-import os, json
+import json
 from pathlib import Path
+from resemblyzer import VoiceEncoder, preprocess_wav
 from scipy.spatial.distance import cosine
-from gtts import gTTS
 import tempfile
-import plotly.express as px
-from sklearn.decomposition import PCA
+import os
 
-st.set_page_config(page_title="Voice Biometrics", page_icon="🎤", layout="centered")
-st.title("🎤 Voice Biometrics Verification System")
-
+# Initialize encoder and database
+encoder = VoiceEncoder()
 DB_PATH = Path("voice_db.json")
+
 if not DB_PATH.exists():
     with open(DB_PATH, "w") as f:
         json.dump({}, f)
 
-encoder = VoiceEncoder()
+# App title
+st.title("🎤 Voice Biometrics Demo")
+st.caption("Register your voice and verify identity using speaker embeddings")
 
-# Utility: load & save voice DB
-def load_db():
-    with open(DB_PATH, "r") as f:
-        return json.load(f)
+# Tabs for Register and Verify
+tab1, tab2 = st.tabs(["🧠 Register Voice", "🔍 Verify Speaker"])
 
-def save_db(db):
-    with open(DB_PATH, "w") as f:
-        json.dump(db, f, indent=2)
+# ----------------------- Registration Tab -----------------------
+with tab1:
+    st.header("🧩 Voice Enrollment")
+    name = st.text_input("Enter speaker name:")
+    uploaded_file = st.file_uploader("Upload a short WAV file (3–10 sec)", type=["wav"], key="register")
 
-# Sidebar Mode
-mode = st.sidebar.radio("Choose Mode", ["🧠 Register Voice", "🔍 Verify Speaker", "📊 Visualize Embeddings"])
+    if uploaded_file and name:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(uploaded_file.read())
+            tmp_path = tmp.name
 
-# -----------------------------
-# 🧠 Register Voice
-# -----------------------------
-if mode == "🧠 Register Voice":
-    name = st.text_input("Enter your name:")
-    uploaded_file = st.file_uploader("Upload your voice sample (.wav)", type=["wav"])
-    if st.button("Register Voice"):
-        if name and uploaded_file:
-            wav_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-            with open(wav_path, "wb") as f:
-                f.write(uploaded_file.read())
-            wav = preprocess_wav(wav_path)
-            embedding = encoder.embed_utterance(wav).tolist()
+        wav = preprocess_wav(Path(tmp_path))
+        embedding = encoder.embed_utterance(wav)
 
-            db = load_db()
-            db[name] = embedding
-            save_db(db)
+        # Save embedding
+        with open(DB_PATH, "r+") as f:
+            db = json.load(f)
+            db[name] = embedding.tolist()
+            f.seek(0)
+            json.dump(db, f, indent=2)
 
-            st.success(f"✅ {name} registered successfully!")
-            st.audio(wav_path)
+        st.success(f"✅ Speaker '{name}' registered successfully!")
+        st.audio(uploaded_file, format="audio/wav")
+
+# ----------------------- Verification Tab -----------------------
+with tab2:
+    st.header("🎙️ Speaker Verification")
+    test_file = st.file_uploader("Upload a voice sample for verification", type=["wav"], key="verify")
+
+    if test_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(test_file.read())
+            tmp_path = tmp.name
+
+        wav_verify = preprocess_wav(Path(tmp_path))
+        embedding_verify = encoder.embed_utterance(wav_verify)
+
+        with open(DB_PATH, "r") as f:
+            db = json.load(f)
+
+        if not db:
+            st.warning("No registered voices yet. Please register first.")
         else:
-            st.warning("Please provide a name and upload a .wav file.")
+            scores = {}
+            for user, emb_list in db.items():
+                emb = np.array(emb_list)
+                similarity = 1 - cosine(embedding_verify, emb)
+                scores[user] = round(similarity, 3)
 
-# -----------------------------
-# 🔍 Verify Speaker
-# -----------------------------
-elif mode == "🔍 Verify Speaker":
-    uploaded_file = st.file_uploader("Upload voice sample for verification (.wav)", type=["wav"])
-    if st.button("Verify Speaker"):
-        if uploaded_file:
-            wav_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-            with open(wav_path, "wb") as f:
-                f.write(uploaded_file.read())
-            wav = preprocess_wav(wav_path)
-            embedding = encoder.embed_utterance(wav)
+            st.subheader("🔎 Similarity Scores")
+            st.dataframe(
+                {"Speaker": list(scores.keys()), "Similarity": list(scores.values())},
+                use_container_width=True,
+            )
 
-            db = load_db()
-            results = []
-            for user, ref_emb in db.items():
-                sim = 1 - cosine(embedding, ref_emb)
-                results.append((user, sim))
-            
-            results = sorted(results, key=lambda x: x[1], reverse=True)
-            st.subheader("Similarity Scores")
-            st.dataframe(results, use_container_width=True)
-
-            if results and results[0][1] > 0.80:
-                user, score = results[0]
-                st.success(f"✅ Verified as {user} (Similarity: {score:.2f})")
-                tts = gTTS(f"Welcome back, {user}!")
+            best_match = max(scores, key=scores.get)
+            if scores[best_match] > 0.80:
+                st.success(f"✅ Verified as {best_match} ({scores[best_match]})")
             else:
                 st.error("❌ Speaker not recognized.")
-                tts = gTTS("Access denied.")
-            
-            audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
-            tts.save(audio_path)
-            st.audio(audio_path, format="audio/mp3")
-        else:
-            st.warning("Please upload a voice sample.")
 
-# -----------------------------
-# 📊 Visualization
-# -----------------------------
-else:
-    db = load_db()
-    if len(db) < 2:
-        st.warning("Need at least 2 registered voices for visualization.")
-    else:
-        names = list(db.keys())
-        embeddings = np.array(list(db.values()))
-        reduced = PCA(n_components=2).fit_transform(embeddings)
-        fig = px.scatter(x=reduced[:,0], y=reduced[:,1], text=names, title="Voice Embedding Clusters")
-        st.plotly_chart(fig)
+            st.audio(test_file, format="audio/wav")
