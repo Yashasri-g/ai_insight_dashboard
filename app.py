@@ -1,5 +1,5 @@
 import streamlit as st
-from streamlit_audio_recorder import st_audio_recorder
+from audiorecorder import audiorecorder   # ✅ correct import for streamlit-audiorecorder
 from resemblyzer import VoiceEncoder, preprocess_wav
 from scipy.spatial.distance import cosine
 import numpy as np
@@ -27,15 +27,20 @@ st.header("🔐 Register Speaker")
 
 st.write("Press record, say a few words (5–10 seconds), and enter your name to register.")
 
-reg_audio = st_audio_recorder(key="reg")
+# record using the audiorecorder component
+reg_audio = audiorecorder("🎙️ Start Recording", "⏹️ Stop Recording", key="reg")
 
-if reg_audio:
-    st.audio(reg_audio, format="audio/wav")
+if len(reg_audio) > 0:
+    st.audio(reg_audio.export().read(), format="audio/wav")
     name = st.text_input("Enter your name:", key="name")
+
     if st.button("Register Voice"):
-        wav_data, sr = sf.read(io.BytesIO(reg_audio))
+        # convert audio segment to numpy waveform
+        wav_bytes = io.BytesIO(reg_audio.export().read())
+        wav_data, sr = sf.read(wav_bytes)
         wav = preprocess_wav(wav_data)
         embedding = encoder.embed_utterance(wav)
+
         registered_speakers[name] = embedding
         st.success(f"✅ Speaker '{name}' registered successfully!")
 
@@ -45,18 +50,21 @@ st.header("🎤 Identify Speaker")
 
 st.write("Record your voice again — we'll try to identify who you are.")
 
-test_audio = st_audio_recorder(key="test")
+test_audio = audiorecorder("🎙️ Start Recording", "⏹️ Stop Recording", key="test")
 
-if test_audio:
-    st.audio(test_audio, format="audio/wav")
+if len(test_audio) > 0:
+    st.audio(test_audio.export().read(), format="audio/wav")
 
-    wav_data, sr = sf.read(io.BytesIO(test_audio))
+    wav_bytes = io.BytesIO(test_audio.export().read())
+    wav_data, sr = sf.read(wav_bytes)
     wav = preprocess_wav(wav_data)
     test_embedding = encoder.embed_utterance(wav)
 
     if registered_speakers:
-        similarities = {name: 1 - cosine(test_embedding, emb)
-                        for name, emb in registered_speakers.items()}
+        similarities = {
+            name: 1 - cosine(test_embedding, emb)
+            for name, emb in registered_speakers.items()
+        }
         identified_name = max(similarities, key=similarities.get)
         confidence = similarities[identified_name]
 
