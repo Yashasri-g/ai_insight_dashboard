@@ -1,0 +1,11 @@
+streamlit==1.36.0
+resemblyzer==0.1.4
+sounddevice
+wavio
+numpy
+scipy
+gTTS
+torch
+torchaudio
+scikit-learn
+plotly
